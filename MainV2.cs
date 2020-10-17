@@ -732,12 +732,8 @@ namespace MissionPlanner
             TCPConsole.Write((byte)'S');
 
             // define default basestream
-#if !LIB
             comPort.BaseStream = new SerialPort();
             comPort.BaseStream.BaudRate = 115200;
-#else
-            comPort.BaseStream = new UdpSerial();
-#endif
 
             _connectionControl = toolStripConnectionControl.ConnectionControl;
             _connectionControl.CMB_baudrate.TextChanged += this.CMB_baudrate_TextChanged;
@@ -1499,17 +1495,29 @@ namespace MissionPlanner
                     // do autoscan
                     Comms.CommsSerialScan.Scan(true);
                     DateTime deadline = DateTime.Now.AddSeconds(50);
-                    while (Comms.CommsSerialScan.foundport == false || Comms.CommsSerialScan.run == 1)
+                    ProgressReporterDialogue prd = new ProgressReporterDialogue();
+                    prd.UpdateProgressAndStatus(-1, "Waiting for ports");
+                    prd.DoWork += sender =>
                     {
-                        System.Threading.Thread.Sleep(500);
-                        Console.WriteLine("wait for port " + CommsSerialScan.foundport + " or " + CommsSerialScan.run);
-                        if (DateTime.Now > deadline)
+                        while (Comms.CommsSerialScan.foundport == false || Comms.CommsSerialScan.run == 1)
                         {
-                            CustomMessageBox.Show(Strings.Timeout);
-                            _connectionControl.IsConnected(false);
-                            return;
+                            System.Threading.Thread.Sleep(500);
+                            Console.WriteLine("wait for port " + CommsSerialScan.foundport + " or " +
+                                              CommsSerialScan.run);
+                            if (sender.doWorkArgs.CancelRequested)
+                            {
+                                sender.doWorkArgs.CancelAcknowledged = true;
+                                return;
+                            }
+
+                            if (DateTime.Now > deadline)
+                            {
+                                _connectionControl.IsConnected(false);
+                                throw new Exception(Strings.Timeout);
+                            }
                         }
-                    }
+                    };
+                    prd.RunBackgroundOperationAsync();
                     return;
                 default:
                     comPort.BaseStream = new SerialPort();
@@ -2457,7 +2465,7 @@ namespace MissionPlanner
                         if (!nextrun.ContainsKey(plugin))
                             nextrun[plugin] = DateTime.MinValue;
 
-                        if (DateTime.Now > plugin.NextRun)
+                        if ((DateTime.Now > plugin.NextRun) && (plugin.loopratehz > 0))
                         {
                             // get ms till next run
                             int msnext = (int)(1000 / plugin.loopratehz);
@@ -2547,12 +2555,12 @@ namespace MissionPlanner
 
                     try
                     {
-                        if (GCSViews.ConfigTerminal.comPort is MAVLinkSerialPort)
+                        if (ConfigTerminal.comPort is MAVLinkSerialPort)
                         {
                         }
                         else
                         {
-                            if (GCSViews.ConfigTerminal.comPort != null && GCSViews.ConfigTerminal.comPort.IsOpen)
+                            if (ConfigTerminal.comPort != null && ConfigTerminal.comPort.IsOpen)
                                 continue;
                         }
                     }
@@ -3110,7 +3118,8 @@ namespace MissionPlanner
 
             ThreadPool.QueueUserWorkItem(BGLogMessagesMetaData);
 
-            ThreadPool.QueueUserWorkItem(BGgetTFR);
+            // tfr went dead on 30-9-2020
+            //ThreadPool.QueueUserWorkItem(BGgetTFR);
 
             ThreadPool.QueueUserWorkItem(BGNoFly);
 
@@ -3790,7 +3799,7 @@ namespace MissionPlanner
         /// <returns></returns>
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
-            if (GCSViews.ConfigTerminal.SSHTerminal) { return false; }
+            if (ConfigTerminal.SSHTerminal) { return false; }
             if (keyData == Keys.F12)
             {
                 MenuConnect_Click(null, null);
@@ -4142,15 +4151,15 @@ namespace MissionPlanner
         }
 
         [StructLayout(LayoutKind.Sequential)]
-        internal class DEV_BROADCAST_HDR
+        public class DEV_BROADCAST_HDR
         {
-            internal Int32 dbch_size;
-            internal Int32 dbch_devicetype;
-            internal Int32 dbch_reserved;
+            public Int32 dbch_size;
+            public Int32 dbch_devicetype;
+            public Int32 dbch_reserved;
         }
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
-        internal class DEV_BROADCAST_PORT
+        public class DEV_BROADCAST_PORT
         {
             public int dbcp_size;
             public int dbcp_devicetype;
@@ -4159,17 +4168,17 @@ namespace MissionPlanner
         }
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
-        internal class DEV_BROADCAST_DEVICEINTERFACE
+        public class DEV_BROADCAST_DEVICEINTERFACE
         {
             public Int32 dbcc_size;
             public Int32 dbcc_devicetype;
             public Int32 dbcc_reserved;
 
             [MarshalAs(UnmanagedType.ByValArray, ArraySubType = UnmanagedType.U1, SizeConst = 16)]
-            internal Byte[]
+            public Byte[]
                 dbcc_classguid;
 
-            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 255)] internal Byte[] dbcc_name;
+            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 255)] public Byte[] dbcc_name;
         }
 
 

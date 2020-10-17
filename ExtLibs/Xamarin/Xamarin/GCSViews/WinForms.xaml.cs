@@ -9,10 +9,15 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
+using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using Acr.UserDialogs.Infrastructure;
 using Microsoft.Scripting.Utils;
+using MissionPlanner.Comms;
+using MissionPlanner.GCSViews;
 using Xamarin.Forms;
 using Xamarin.Forms.Xaml;
 using Xamarin.Essentials;
@@ -28,16 +33,89 @@ namespace Xamarin.GCSViews
     [XamlCompilation(XamlCompilationOptions.Compile)]
     public partial class WinForms : ContentPage
     {
+        readonly string TAG = "MP";
+
         static WinForms Instance;
 
         public WinForms()
         {
             InitializeComponent();
 
+            size = Device.Info.ScaledScreenSize;
+            size = Device.Info.PixelScreenSize;
+
+            var scale = size.Width / size.Height; // 1.77 1.6  1.33
+
+            size = new Forms.Size(960, 540/*960/scale*/);
+            
             Instance = this;
             MainV2.speechEngine = new Speech();
+
+            // init seril port type
+            SerialPort.DefaultType = (self, s, i) =>
+            {
+                return Task.Run(async () =>
+                {
+                    Log.Info(TAG, "SerialPort.DefaultType in " + s + " " + i);
+
+                    // no valid portname to start
+                    if (String.IsNullOrEmpty(s))
+                    {
+                        Log.Info(TAG, "SerialPort.DefaultType passthrough s = null");
+                        return self._baseport;
+                    }
+                    else
+                    {
+                        var dil = await Test.UsbDevices.GetDeviceInfoList();
+
+                        var di = dil.Where(a => a.board == s);
+
+                        if (di.Count() > 0)
+                        {
+                            Log.Info(TAG, "SerialPort.DefaultType found device " + di.First().board + " search " + s);
+                            return await Test.UsbDevices.GetUSB(di.First());
+                        }
+                    }
+
+                    Log.Info(TAG, "SerialPort.DefaultType passthrough no board match");
+                    return self._baseport;
+                }).Result;
+            };
+
+            // report back device list
+            SerialPort.GetCustomPorts = () =>
+            {
+                return Task.Run(async () =>
+                {
+                    var list = await Test.UsbDevices.GetDeviceInfoList();
+                    return list.Select(a => a.board).ToList();
+                }).Result;
+            };
+
+            // support for fw upload
+            MissionPlanner.GCSViews.ConfigurationView.ConfigFirmwareManifest.ExtraDeviceInfo += () =>
+            {
+                return Task.Run(async () => { return await Test.UsbDevices.GetDeviceInfoList(); }).Result;
+            };
+
+            MissionPlanner.GCSViews.ConfigurationView.ConfigFirmware.ExtraDeviceInfo += () =>
+            {
+                return Task.Run(async () => { return await Test.UsbDevices.GetDeviceInfoList(); }).Result;
+            };
         }
-        
+
+        public static string BundledPath
+        {
+            get { return SITL.BundledPath; }
+            set { SITL.BundledPath = value; }
+        }
+
+        public static Action InitDevice
+        {
+            get => _initDevice;
+            set => _initDevice = value;
+        }
+
         protected override void OnAppearing()
         {
             if (!start)
@@ -49,6 +127,8 @@ namespace Xamarin.GCSViews
             }
 
             SkCanvasView.InvalidateSurface();
+
+            Activate();
 
             base.OnAppearing();
         }
@@ -149,7 +229,12 @@ namespace Xamarin.GCSViews
                 {
                     if (result.Result)
                     {
-                        Application.OpenForms[Application.OpenForms.Count - 1].Close();
+                        // ensure we run on the right thread
+                        Application.Idle += (sender, args) =>
+                        {
+                            Application.Exit();
+                            
+                        };
                         XplatUIMine.PaintPending = true;
                     }
                 });
@@ -162,18 +247,12 @@ namespace Xamarin.GCSViews
 
         protected override void OnDisappearing()
         {
+            Deactivate();
             base.OnDisappearing();
         }
 
         private void StartThreads()
         {
-            size = Device.Info.ScaledScreenSize;
-            size = Device.Info.PixelScreenSize;
-
-            size = new Forms.Size(900, 540); // 1.66 - remove back and home pane
-            scale = new Forms.Size((Device.Info.PixelScreenSize.Width / size.Width),
-                (Device.Info.PixelScreenSize.Height / size.Height));
-
             XplatUIMine.GetInstance()._virtualScreen = new Rectangle(0, 0, (int) size.Width, (int) size.Height);
             XplatUIMine.GetInstance()._workingArea = new Rectangle(0, 0, (int) size.Width, (int) size.Height);
 
@@ -181,10 +260,25 @@ namespace Xamarin.GCSViews
             {
                 AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
 
-                Application.Idle += (sender, args) => Thread.Sleep(0);
+                var init = true;
+
+                Application.Idle += (sender, args) =>
+                {
+                    if (MainV2.instance != null && MainV2.instance.IsHandleCreated)
+                    {
+                        if (init)
+                        {
+                            Device.BeginInvokeOnMainThread(() => { InitDevice?.Invoke(); });
+                            init = false;
+                        }
+                    }
+
+                    Thread.Sleep(0);
+                };
 
                 MissionPlanner.Program.Main(new string[0]);
-             
+                
+                System.Diagnostics.Process.GetCurrentProcess().CloseMainWindow();
             });
             winforms.Start();
 
@@ -193,15 +287,15 @@ namespace Xamarin.GCSViews
                 Monitor.Enter(XplatUIMine.paintlock);
                 if (XplatUIMine.PaintPending)
                 {
-                    if (SkCanvasView != null)
+                    if (Instance.SkCanvasView != null)
                     {
-                        scale = new Forms.Size((Instance.SkCanvasView.CanvasSize.Width / size.Width),
-                            (Instance.SkCanvasView.CanvasSize.Height / size.Height));
+                        Instance.scale = new Forms.Size((Instance.SkCanvasView.CanvasSize.Width / Instance.size.Width),
+                            (Instance.SkCanvasView.CanvasSize.Height / Instance.size.Height));
 
                         XplatUIMine.GetInstance()._virtualScreen =
-                            new Rectangle(0, 0, (int) size.Width, (int) size.Height);
+                            new Rectangle(0, 0, (int) Instance.size.Width, (int) Instance.size.Height);
                         XplatUIMine.GetInstance()._workingArea =
-                            new Rectangle(0, 0, (int) size.Width, (int) size.Height);
+                            new Rectangle(0, 0, (int) Instance.size.Width, (int) Instance.size.Height);
 
                         Device.BeginInvokeOnMainThread(() => { Instance.SkCanvasView.InvalidateSurface(); });
                         XplatUIMine.PaintPending = false;
@@ -247,8 +341,8 @@ namespace Xamarin.GCSViews
                 {
                     if (touchDictionary.ContainsKey(e.Id))
                     {
-                        if (Math.Abs(touchDictionary[e.Id].atdown.Location.X / scale.Width - x) > 5 &&
-                            Math.Abs(touchDictionary[e.Id].atdown.Location.Y / scale.Height - y) > 5)
+                        if (Math.Abs(touchDictionary[e.Id].atdown.Location.X / scale.Width - x) > 2 &&
+                            Math.Abs(touchDictionary[e.Id].atdown.Location.Y / scale.Height - y) > 2)
                         {
                             //Console.WriteLine("Mouse has moved");
                             touchDictionary[e.Id].hasmoved = true;
@@ -412,6 +506,139 @@ namespace Xamarin.GCSViews
             } catch {}
         }
 
+        private bool DrawOntoSurface(IntPtr handle, SKSurface surface)
+        {
+
+            var hwnd = Hwnd.ObjectFromHandle(handle);
+
+            var x = 0;
+            var y = 0;
+
+            XplatUI.driver.ClientToScreen(hwnd.client_window, ref x, ref y);
+
+            var width = 0;
+            var height = 0;
+            var client_width = 0;
+            var client_height = 0;
+
+
+            if (hwnd.hwndbmp != null && hwnd.Mapped && hwnd.Visible && !hwnd.zombie)
+            {
+                // setup clip
+                var parent = hwnd;
+                surface.Canvas.ClipRect(
+                    SKRect.Create(0, 0, Screen.PrimaryScreen.Bounds.Width,
+                        Screen.PrimaryScreen.Bounds.Height), (SKClipOperation) 5);
+
+                while (parent != null)
+                {
+                    var xp = 0;
+                    var yp = 0;
+                    XplatUI.driver.ClientToScreen(parent.client_window, ref xp, ref yp);
+
+                    surface.Canvas.ClipRect(SKRect.Create(xp, yp, parent.Width, parent.Height),
+                        SKClipOperation.Intersect);
+                    /*
+                    surface.Canvas.DrawRect(xp, yp, parent.Width, parent.Height,
+                        new SKPaint()
+                        {
+
+                            Color = new SKColor(255, 0, 0),
+                            Style = SKPaintStyle.Stroke
+
+
+                        });
+                    */
+                    parent = parent.parent;
+                }
+
+                Monitor.Enter(XplatUIMine.paintlock);
+
+                if (hwnd.ClientWindow != hwnd.WholeWindow)
+                {
+                    var frm = Control.FromHandle(hwnd.ClientWindow) as Form;
+
+                    Hwnd.Borders borders = new Hwnd.Borders();
+
+                    if (frm != null)
+                    {
+                        borders = Hwnd.GetBorders(frm.GetCreateParams(), null);
+
+                        surface.Canvas.ClipRect(
+                            SKRect.Create(0, 0, Screen.PrimaryScreen.Bounds.Width,
+                                Screen.PrimaryScreen.Bounds.Height), (SKClipOperation) 5);
+                    }
+
+                    if (surface.Canvas.DeviceClipBounds.Width > 0 &&
+                        surface.Canvas.DeviceClipBounds.Height > 0)
+                    {
+
+                        surface.Canvas.DrawImage(hwnd.hwndbmpNC,
+                            new SKPoint(x - borders.left, y - borders.top),
+                            new SKPaint() {FilterQuality = SKFilterQuality.Low});
+
+                        surface.Canvas.ClipRect(
+                            SKRect.Create(x, y, hwnd.width - borders.right - borders.left,
+                                hwnd.height - borders.top - borders.bottom), SKClipOperation.Intersect);
+                       
+                        surface.Canvas.DrawImage(hwnd.hwndbmp,
+                            new SKPoint(x, y),
+                            new SKPaint() {FilterQuality = SKFilterQuality.Low});
+
+                    }
+                    else
+                    {
+                        Monitor.Exit(XplatUIMine.paintlock);
+                        return true;
+                    }
+                }
+                else
+                {
+                    if (surface.Canvas.DeviceClipBounds.Width > 0 &&
+                        surface.Canvas.DeviceClipBounds.Height > 0)
+                    {
+
+                        surface.Canvas.DrawImage(hwnd.hwndbmp,
+                            new SKPoint(x + 0, y + 0),
+                            new SKPaint() {FilterQuality = SKFilterQuality.Low});
+
+                    }
+                    else
+                    {
+                        Monitor.Exit(XplatUIMine.paintlock);
+                        return true;
+                    }
+                }
+
+                Monitor.Exit(XplatUIMine.paintlock);
+            }
+
+            //surface.Canvas.DrawText(x + " " + y, x, y+10, new SKPaint() { Color =  SKColors.Red});
+
+            if (hwnd.Mapped && hwnd.Visible)
+            {
+                IEnumerable<Hwnd> children;
+                lock (Hwnd.windows)
+                    children = Hwnd.windows.OfType<System.Collections.DictionaryEntry>()
+                        .Where(hwnd2 =>
+                        {
+                            var Key = (IntPtr) hwnd2.Key;
+                            var Value = (Hwnd) hwnd2.Value;
+                            if (Value.ClientWindow == Key && Value.Parent == hwnd && Value.Visible &&
+                                Value.Mapped && !Value.zombie)
+                                return true;
+                            return false;
+                        }).Select(a => (Hwnd) a.Value).ToArray();
+
+                foreach (var child in children)
+                {
+                    DrawOntoSurface(child.ClientWindow, surface);
+                }
+            }
+
+            return true;
+        }
+
         private void SkCanvasView_PaintSurface(object sender, SkiaSharp.Views.Forms.SKPaintSurfaceEventArgs e)
         {
             SkCanvasView_PaintSurface(sender, new SKPaintGLSurfaceEventArgs(e.Surface, null));
@@ -424,144 +651,11 @@ namespace Xamarin.GCSViews
 
                 var surface = e.Surface;
 
-                e.Surface.Canvas.Clear(SKColors.Gray);
+                surface.Canvas.Clear(SKColors.Gray);
 
                 surface.Canvas.DrawCircle(0, 0, 50, new SKPaint() {Color = SKColor.Parse("ff0000")});
 
-                e.Surface.Canvas.Scale((float) scale.Width, (float) scale.Height);
-
-                Func<IntPtr, bool> func = null;
-                func = (handle) =>
-                {
-                    var hwnd = Hwnd.ObjectFromHandle(handle);
-
-                    var x = 0;
-                    var y = 0;
-
-                    XplatUI.driver.ClientToScreen(hwnd.client_window, ref x, ref y);
-
-                    var width = 0;
-                    var height = 0;
-                    var client_width = 0;
-                    var client_height = 0;
-
-
-                    if (hwnd.hwndbmp != null && hwnd.Mapped && hwnd.Visible && !hwnd.zombie)
-                    {
-                        // setup clip
-                        var parent = hwnd;
-                        surface.Canvas.ClipRect(
-                            SKRect.Create(0, 0, Screen.PrimaryScreen.Bounds.Width,
-                                Screen.PrimaryScreen.Bounds.Height), (SKClipOperation) 5);
-
-                        while (parent != null)
-                        {
-                            var xp = 0;
-                            var yp = 0;
-                            XplatUI.driver.ClientToScreen(parent.client_window, ref xp, ref yp);
-
-                            surface.Canvas.ClipRect(SKRect.Create(xp, yp, parent.Width, parent.Height),
-                                SKClipOperation.Intersect);
-                            /*
-                            surface.Canvas.DrawRect(xp, yp, parent.Width, parent.Height,
-                                new SKPaint()
-                                {
-
-                                    Color = new SKColor(255, 0, 0),
-                                    Style = SKPaintStyle.Stroke
-
-
-                                });
-                            */
-                            parent = parent.parent;
-                        }
-
-                        Monitor.Enter(XplatUIMine.paintlock);
-
-                        if (hwnd.ClientWindow != hwnd.WholeWindow)
-                        {
-                            var frm = Control.FromHandle(hwnd.ClientWindow) as Form;
-
-                            Hwnd.Borders borders = new Hwnd.Borders();
-
-                            if (frm != null)
-                            {
-                                borders = Hwnd.GetBorders(frm.GetCreateParams(), null);
-
-                                surface.Canvas.ClipRect(
-                                    SKRect.Create(0, 0, Screen.PrimaryScreen.Bounds.Width,
-                                        Screen.PrimaryScreen.Bounds.Height), (SKClipOperation) 5);
-                            }
-
-                            if (surface.Canvas.DeviceClipBounds.Width > 0 &&
-                                surface.Canvas.DeviceClipBounds.Height > 0)
-                            {
-                             
-                                surface.Canvas.DrawImage(hwnd.hwndbmpNC,
-                                    new SKPoint(x - borders.left, y - borders.top),
-                                    new SKPaint() {FilterQuality = SKFilterQuality.Low});
-                                
-                                surface.Canvas.ClipRect(
-                                    SKRect.Create(x, y, hwnd.width - borders.right - borders.left,
-                                        hwnd.height - borders.top - borders.bottom), SKClipOperation.Intersect);
-                                
-                                surface.Canvas.DrawImage(hwnd.hwndbmp,
-                                    new SKPoint(x, y),
-                                    new SKPaint() {FilterQuality = SKFilterQuality.Low});
-                             
-                            } 
-                            else
-                            {
-                                Monitor.Exit(XplatUIMine.paintlock);
-                                return true;
-                            }
-                        }
-                        else
-                        {
-                            if (surface.Canvas.DeviceClipBounds.Width > 0 &&
-                                surface.Canvas.DeviceClipBounds.Height > 0)
-                            {
-                                
-                                surface.Canvas.DrawImage(hwnd.hwndbmp,
-                                    new SKPoint(x + 0, y + 0),
-                                    new SKPaint() {FilterQuality = SKFilterQuality.Low});
-                                
-                            } 
-                            else
-                            {
-                                Monitor.Exit(XplatUIMine.paintlock);
-                                return true;
-                            }
-                        }
-
-                        Monitor.Exit(XplatUIMine.paintlock);
-                    }
-
-                    //surface.Canvas.DrawText(x + " " + y, x, y+10, new SKPaint() { Color =  SKColors.Red});
-
-                    if (hwnd.Mapped && hwnd.Visible)
-                    {
-                        IEnumerable<Hwnd> children;
-                        lock (Hwnd.windows)
-                            children = Hwnd.windows.OfType<System.Collections.DictionaryEntry>()
-                                .Where(hwnd2 =>
-                                {
-                                    var Key = (IntPtr) hwnd2.Key;
-                                    var Value = (Hwnd) hwnd2.Value;
-                                    if (Value.ClientWindow == Key && Value.Parent == hwnd && Value.Visible &&
-                                        Value.Mapped && !Value.zombie)
-                                        return true;
-                                    return false;
-                                }).Select(a => (Hwnd) a.Value).ToArray();
-
-                        foreach (var child in children)
-                        {
-                            func(child.ClientWindow);
-                        }
-                    }
-
-                    return true;
-                };
+                surface.Canvas.Scale((float) scale.Width, (float) scale.Height);
 
                 foreach (Form form in Application.OpenForms.Select(a=>a).ToArray())
                 {
@@ -596,7 +690,7 @@ namespace Xamarin.GCSViews
 
                         try
                         {
-                            func(form.Handle);
+                            DrawOntoSurface(form.Handle, surface);
                         }
                         catch (Exception ex)
                         {
@@ -615,7 +709,7 @@ namespace Xamarin.GCSViews
                     {
                         var ctlmenu = Control.FromHandle(hw.ClientWindow);
                         if (ctlmenu != null)
-                            func(hw.ClientWindow);
+                            DrawOntoSurface(hw.ClientWindow, surface);
                     }
                 }
 
@@ -716,6 +810,64 @@ namespace Xamarin.GCSViews
         };
 
         static private Thread winforms;
+        private static Action _initDevice;
+
+        public void Activate()
+        {
+            Test.UsbDevices.USBEvent += DeviceAttached;
+        }
+
+        private async void DeviceAttached(object sender, MissionPlanner.ArduPilot.DeviceInfo e)
+        {
+            var portUsb = await Test.UsbDevices.GetUSB(e);
+
+            if (portUsb == null)
+                return;
+
+            if (MainV2.comPort.BaseStream.IsOpen)
+                return;
+
+            try
+            {
+                // send hook
+                const int DBT_DEVTYP_PORT = 0x00000003;
+
+                var prt = new MainV2.DEV_BROADCAST_PORT();
+                prt.dbcp_devicetype = DBT_DEVTYP_PORT;
+                prt.dbcp_name = ASCIIEncoding.Unicode.GetBytes(e.board);
+                prt.dbcp_size = prt.dbcp_name.Length * 2 + 4 * 3;
+
+                IntPtr tosend;
+                tosend = Marshal.AllocHGlobal(Marshal.SizeOf(prt));
+                Marshal.StructureToPtr(prt, tosend, true);
+
+                XplatUI.driver.SendMessage(IntPtr.Zero, Msg.WM_DEVICECHANGE,
+                    (IntPtr) MainV2.WM_DEVICECHANGE_enum.DBT_DEVICEARRIVAL, tosend);
+            }
+            catch
+            {
+
+            }
+
+            // autoconnect
+            if (!e.board.ToLower().Contains("-bl") && !e.board.ToLower().Contains("-P2"))
+            {
+                var ans = await DisplayAlert("Connect", "Connect to USB Device? " + e.board, "Yes", "No");
+                if (ans)
+                {
+                    MainV2.comPort.BaseStream = portUsb;
+                    MainV2.instance.BeginInvoke((Action) delegate()
+                    {
+                        MainV2.instance.doConnect(MainV2.comPort, "preset", "0");
+                    });
+                }
+            }
+        }
+
+        public void Deactivate()
+        {
+            Test.UsbDevices.USBEvent -= DeviceAttached;
+        }
     }
 
     public class TouchInfo

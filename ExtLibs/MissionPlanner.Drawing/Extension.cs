@@ -1,6 +1,7 @@
 ﻿using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Globalization;
 using System.Security.Cryptography.X509Certificates;
 using SkiaSharp;
 
@@ -55,16 +56,40 @@ namespace System.Drawing
 
         public static SKPaint ToSKPaint(this Font font)
         {
+            var fm = SKFontManager.Default;
+            var id = font.Name;
             lock (fontcache)
-            {
-                if (!fontcache.ContainsKey(font.Name))
-                    fontcache[font.Name] = SKTypeface.FromFamilyName(font.Name);
-            }
+                if (CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "zh")
+                {
+                    id = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
+                    if (!fontcache.ContainsKey(id))
+                        fontcache[CultureInfo.CurrentUICulture.TwoLetterISOLanguageName] =
+                            fm.MatchCharacter("", new[] {"zh"}, '飞');
+                }
+                else if (CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ja")
+                {
+                    id = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
+                    if (!fontcache.ContainsKey(id))
+                        fontcache[CultureInfo.CurrentUICulture.TwoLetterISOLanguageName] =
+                            fm.MatchCharacter("", new[] {"ja"}, 'フ');
+                }
+                else if (CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "kr")
+                {
+                    id = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
+                    if (!fontcache.ContainsKey(id))
+                        fontcache[CultureInfo.CurrentUICulture.TwoLetterISOLanguageName] =
+                            fm.MatchCharacter("", new[] {"kr"}, '비');
+                }
+                else
+                {
+                    if (!fontcache.ContainsKey(id))
+                        fontcache[id] = SKTypeface.FromFamilyName(id);
+                }
 
             return new SKPaint
             {
-                Typeface = fontcache[font.Name],
-                TextSize = font.Size,
+                Typeface = fontcache[id],
+                TextSize = font.SizeInPoints * 1.33334f,
                 StrokeWidth = 2,
             };
         }

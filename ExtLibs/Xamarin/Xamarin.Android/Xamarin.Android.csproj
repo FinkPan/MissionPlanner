@@ -22,6 +22,7 @@
     <NuGetPackageImportStamp>
     </NuGetPackageImportStamp>
     <AndroidKeyStore>false</AndroidKeyStore>
+    <Deterministic>false</Deterministic>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
@@ -40,8 +41,8 @@
     </AndroidStoreUncompressedFileExtensions>
     <AndroidEnableProfiledAot>false</AndroidEnableProfiledAot>
     <MandroidI18n>West</MandroidI18n>
-    <AndroidUseSharedRuntime>true</AndroidUseSharedRuntime>
-    <EmbedAssembliesIntoApk>false</EmbedAssembliesIntoApk>
+    <AndroidUseSharedRuntime>false</AndroidUseSharedRuntime>
+    <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
     <AndroidUseAapt2>true</AndroidUseAapt2>
     <AndroidCreatePackagePerAbi>false</AndroidCreatePackagePerAbi>
     <AndroidEnableMultiDex>false</AndroidEnableMultiDex>
@@ -154,6 +155,23 @@
     <Compile Include="USBDevices.cs" />
   </ItemGroup>
   <ItemGroup>
+    <AndroidNativeLibrary Include="lib\arm64-v8a\libarduplane.so" />
+    <AndroidNativeLibrary Include="lib\arm64-v8a\libardurover.so" />
+    <AndroidNativeLibrary Include="lib\arm64-v8a\libardusub.so" />
+    <AndroidNativeLibrary Include="lib\arm64-v8a\libarducopter.so" />
+    <AndroidNativeLibrary Include="lib\armeabi-v7a\libarducopter.so" />
+    <AndroidNativeLibrary Include="lib\armeabi-v7a\libarduplane.so" />
+    <AndroidNativeLibrary Include="lib\armeabi-v7a\libardurover.so" />
+    <AndroidNativeLibrary Include="lib\armeabi-v7a\libardusub.so" />
+    <AndroidResource Include="..\..\..\airports.csv">
+      <Link>Resources\raw\airports.csv</Link>
+    </AndroidResource>
+    <AndroidResource Include="..\..\..\BurntKermit.mpsystheme">
+      <Link>Resources\raw\BurntKermit.mpsystheme</Link>
+    </AndroidResource>
+    <AndroidResource Include="..\..\..\HighContrast.mpsystheme">
+      <Link>Resources\raw\HighContrast.mpsystheme</Link>
+    </AndroidResource>
     <None Include="Resources\AboutResources.txt" />
     <None Include="Assets\AboutAssets.txt" />
     <None Include="Properties\AndroidManifest.xml" />
@@ -216,6 +234,65 @@
       <Project>{567c5db1-9d8d-4a82-a89b-7e9357e7f6d8}</Project>
       <Name>Xamarin</Name>
     </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <AndroidResource Include="Resources\xml\device_filter.xml" />
+  </ItemGroup>
+  <ItemGroup>
+    <AndroidResource Include="..\..\..\acsimplepids.xml">
+      <Link>Resources\raw\acsimplepids.xml</Link>
+    </AndroidResource>
+  </ItemGroup>
+  <ItemGroup>
+    <AndroidResource Include="..\..\..\aircraft.xml">
+      <Link>Resources\raw\aircraft.xml</Link>
+    </AndroidResource>
+  </ItemGroup>
+  <ItemGroup>
+    <AndroidResource Include="..\..\..\ArduCopterConfig.xml">
+      <Link>Resources\raw\ArduCopterConfig.xml</Link>
+    </AndroidResource>
+  </ItemGroup>
+  <ItemGroup>
+    <AndroidResource Include="..\..\..\camerasBuiltin.xml">
+      <Link>Resources\raw\camerasBuiltin.xml</Link>
+    </AndroidResource>
+  </ItemGroup>
+  <ItemGroup>
+    <AndroidResource Include="..\..\..\ChangeLog.txt">
+      <Link>Resources\raw\ChangeLog.txt</Link>
+    </AndroidResource>
+  </ItemGroup>
+  <ItemGroup>
+    <AndroidResource Include="..\..\..\checklistDefault.xml">
+      <Link>Resources\raw\checklistDefault.xml</Link>
+    </AndroidResource>
+  </ItemGroup>
+  <ItemGroup>
+    <AndroidResource Include="..\..\..\dataflashlog.xml">
+      <Link>Resources\raw\dataflashlog.xml</Link>
+    </AndroidResource>
+  </ItemGroup>
+  <ItemGroup>
+    <AndroidResource Include="..\..\..\FirmwareHistory.txt">
+      <Link>Resources\raw\FirmwareHistory.txt</Link>
+    </AndroidResource>
+  </ItemGroup>
+  <ItemGroup>
+    <AndroidResource Include="..\..\..\mavcmd.xml">
+      <Link>Resources\raw\mavcmd.xml</Link>
+    </AndroidResource>
+  </ItemGroup>
+  <ItemGroup>
+    <AndroidResource Include="..\..\..\mavextra.py">
+      <Link>Resources\raw\mavextra.py</Link>
+    </AndroidResource>
+  </ItemGroup>
+  <ItemGroup>
+    <AndroidResource Include="..\..\..\ParameterMetaDataBackup.xml">
+      <Link>Resources\raw\ParameterMetaDataBackup.xml</Link>
+      <Generator>MSBuild:UpdateGeneratedFiles</Generator>
+    </AndroidResource>
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\Xamarin\Android\Xamarin.Android.CSharp.targets" />
   <PropertyGroup>

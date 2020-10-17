@@ -81,8 +81,8 @@ GRBackendRenderTargetDesc backendRenderTargetDescription = new GRBackendRenderTa
         }
         public CompositingMode CompositingMode { get; set; }
         public CompositingQuality CompositingQuality { get; set; }
-        public float DpiX { get; } = 72;
-        public float DpiY { get; } = 72;
+        public float DpiX { get; } = 96;
+        public float DpiY { get; } = 96;
         public InterpolationMode InterpolationMode { get; set; }
         public bool IsClipEmpty { get; }
         public bool IsVisibleClipEmpty { get; }
@@ -139,6 +139,9 @@ GRBackendRenderTargetDesc backendRenderTargetDescription = new GRBackendRenderTa
 
         public static Graphics FromImage(Image bmpDestination)
         {
+            if (bmpDestination.Width == 0 || bmpDestination.Height == 0)
+                return new Graphics(SKSurface.CreateNull(1, 1));
+
             var bmpdata = ((Bitmap) bmpDestination).LockBits(
                 new Rectangle(0, 0, bmpDestination.Width, bmpDestination.Height),
                 null, SKColorType.Bgra8888);
@@ -147,8 +150,18 @@ GRBackendRenderTargetDesc backendRenderTargetDescription = new GRBackendRenderTa
 
         public static Graphics FromSKImage(SKImage bmpDestination)
         {
-            var pixels = bmpDestination.PeekPixels();
-            return new Graphics(SKSurface.Create(pixels));
+            if (bmpDestination.IsLazyGenerated)
+            {
+                var pixels = bmpDestination.ToRasterImage().PeekPixels();
+                if (pixels == null)
+                    return new Graphics(SKSurface.CreateNull(1,1));
+                return new Graphics(SKSurface.Create(pixels));
+            }
+            else
+            {
+                var pixels = bmpDestination.PeekPixels();
+                return new Graphics(SKSurface.Create(pixels));
+            }
         }
 
         public static implicit operator Image(Graphics sk)
@@ -842,22 +855,6 @@ GRBackendRenderTargetDesc backendRenderTargetDescription = new GRBackendRenderTa
                 _image.DrawText(line.TrimEnd(), layoutRectangle.X, layoutRectangle.Y - 2 + (a+1) *font.Height, pnt);
                 a++;
             }            
-        }
-
-        private void DrawText(SKCanvas canvas, string text, SKRect area, SKPaint paint)
-        {
-            float lineHeight = paint.TextSize * 1.1f;
-            var lines = SplitLines(text, paint, area.Width);
-            var height = lines.Count() * lineHeight;
-
-            var y = area.MidY - 2 - height / 2;
-
-            foreach (var line in lines)
-            {
-                y += lineHeight;
-                var x = area.MidX - line.Width / 2;
-                canvas.DrawText(line.Value, x, y, paint);
-            }
         }
 
         public class Line
